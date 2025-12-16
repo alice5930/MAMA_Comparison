@@ -1,0 +1,70 @@
+# Trae
+.trae/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE settings
+.vscode/
+.idea/
+
+# Experiment results and cache
+results/
+cache/
+src/cache/
+src/results/
+src/experiments/case_studies/results/
+*.json
+*.csv
+!requirements.txt
+
+# Model checkpoints and cache
+checkpoints/
+*.pt
+models/blobs/
+models/refs/
+models/snapshots/
+models/**/cache/
+
+# Data files
+data/api_snapshots/
+data/test_queries.json
+data/train_queries.json
+data/validation_queries.json
+src/data/data/
+src/data/offline_testbed.json
+src/data/standard_dataset*.json
+
+# External APIs and sensitive content
+src/external_apis/
+**/api_keys.py
+**/credentials.py
+**/config.ini
+**/secrets.json
+
+# macOS system files
+.DS_Store
+**/.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+logs/
+tmp/
+
+# Duplicate SBERT model
+src/evaluation/models/.DS_Store
