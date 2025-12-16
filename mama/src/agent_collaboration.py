@@ -893,6 +893,21 @@ class FlightInfoAgent (BaseAgent ):
             self .aircraft_efficiency_weight *aircraft_efficiency +
             self .time_slot_weight *time_slot_desirability 
             )
+
+            # Context gain from Economic in Chain protocol
+            context =flight_data .get ('context',{})
+            if context .get ('protocol')=='chain':
+                econ_ctx =context .get ('economic_context')
+                if econ_ctx and isinstance (econ_ctx ,dict )and econ_ctx .get ('status')=='success':
+                    econ_score =float (econ_ctx .get ('economic_score',0.5 ))
+                    # Adjust operational score based on economic factors
+                    if econ_score <0.3 :
+                        # Poor economics might correlate with less desirable operational slots/gates
+                        operational_score =max (0.05 ,operational_score -0.15 )
+                    elif econ_score >0.8 :
+                        # Strong economics might suggest premium handling
+                        operational_score =min (0.99 ,operational_score +0.1 )
+
             operational_score =max (0.05 ,min (0.99 ,operational_score ))
 
             flight_identifier =row .get ('flight_id')
@@ -1141,6 +1156,21 @@ class EconomicAgent (BaseAgent ):
             self .base_cost_weight *base_cost_score +
             self .time_value_weight *time_value 
             )
+
+            # Context gain from Safety in Chain protocol
+            context =flight_data .get ('context',{})
+            if context .get ('protocol')=='chain':
+                safety_ctx =context .get ('safety_context')
+                if safety_ctx and isinstance (safety_ctx ,dict )and safety_ctx .get ('status')=='success':
+                    safety_score =float (safety_ctx .get ('overall_safety_score',0.5 ))
+                    # Adjust economic score based on safety profile
+                    if safety_score <0.4 :
+                         # High risk implies potential disruption costs
+                        overall_score =max (0.05 ,overall_score -0.2 )
+                    elif safety_score >0.9 :
+                        # High safety implies reliability value
+                        overall_score =min (0.99 ,overall_score +0.1 )
+
             overall_score =max (0.05 ,min (0.99 ,overall_score ))
 
             flight_identifier =row .get ('flight_id')

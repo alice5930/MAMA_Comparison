@@ -226,7 +226,7 @@ class EvaluationMetrics :
             for i ,predicted_item in enumerate (predicted_ranking ):
                 if predicted_item in ground_truth_ranking :
                     reciprocal_rank =1.0 /(i +1 )
-                    return reciprocal_rank
+                    return max(0.0, min(1.0, reciprocal_rank))
 
             return 0.0
 
@@ -944,94 +944,136 @@ async def run_full_evaluation ()->Dict [str ,Any ]:
         'timestamp':datetime .now ().isoformat ()
         }
 
-async def run_protocol_evaluations_and_plots (protocols :List [str ]=None )->Dict [str ,Any ]:
-    protocols =protocols or ['hub_and_spoke','broadcast','chain']
-    results_by_protocol ={}
-    art_records =[]
-    scatter_records =[]
-    try :
-        sns .set_theme (style ='whitegrid',palette ='deep')
-    except Exception :
-        pass 
-    for proto in protocols :
-        os .environ ['MAMA_PROTOCOL']=proto
-        eval_result =await run_full_evaluation ()
-        results_by_protocol [proto ]=eval_result
-        scenario_eval =eval_result .get ('scenario_evaluation',{})
-        scenario_results =scenario_eval .get ('scenario_results',{})
-        aggregate =scenario_eval .get ('aggregate_metrics',{})
-        avg_mrr =aggregate .get ('average_mrr',0.0 )
-        avg_art =aggregate .get ('average_response_time',0.0 )
-        scatter_records .append ({'protocol':proto ,'average_mrr':avg_mrr ,'average_art':avg_art })
-        for name ,sr in scenario_results .items ():
-            metrics =sr .get ('metrics',{})
-            art =metrics .get ('response_time')
-            if art is not None :
-                art_records .append ({'protocol':proto ,'scenario':name ,'response_time':art })
-    try :
-        import pandas as pd 
-        df_art =pd .DataFrame (art_records )
-        df_scatter =pd .DataFrame (scatter_records )
-        figures_dir =Path ("figures").joinpath ("extended")
-        figures_dir .mkdir (parents =True ,exist_ok =True )
-        if df_art .empty :
-            fallback_rows =[]
-            for proto in protocols :
-                agg =results_by_protocol .get (proto ,{}).get ('scenario_evaluation',{}).get ('aggregate_metrics',{})
-                rt =agg .get ('average_response_time')
-                if rt is not None :
-                    fallback_rows .append ({'protocol':proto ,'scenario':'aggregate','response_time':rt })
-            df_art =pd .DataFrame (fallback_rows )
-        if not df_art .empty and 'protocol'in df_art .columns and 'response_time'in df_art .columns :
-            plt .figure (figsize =(8 ,5 ))
-            sns .boxplot (data =df_art ,x ='protocol',y ='response_time')
-            plt .ylabel ("Response Time (s)")
-            plt .xlabel ("Protocol")
-            try :
-                import numpy as np 
-                mean_points =df_art .groupby ('protocol')['response_time'].mean ().reset_index ()
-                sns .pointplot (data =mean_points ,x ='protocol',y ='response_time',color ='black',markers ='D')
-            except Exception :
-                pass 
-            plt .title ("Protocol Latency Distribution (ART)")
-            art_path =figures_dir /"art_boxplot.png"
-            plt .tight_layout ()
-            plt .savefig (str (art_path ))
-            plt .close ()
-        else :
-            art_path =figures_dir /"art_boxplot_skipped.png"
-        if not df_scatter .empty and {'average_art','average_mrr','protocol'}.issubset (set (df_scatter .columns )):
-            plt .figure (figsize =(8 ,5 ))
-            sns .scatterplot (data =df_scatter ,x ='average_art',y ='average_mrr',hue ='protocol')
-            plt .xlabel ("Average Response Time (s)")
-            plt .ylabel ("Average MRR")
-            try :
-                sns .regplot (data =df_scatter ,x ='average_art',y ='average_mrr',scatter =False ,color ='gray')
-                for _ ,row in df_scatter .iterrows ():
-                    plt .text (row ['average_art'],row ['average_mrr']+0.002 ,row ['protocol'],fontsize =9 )
-            except Exception :
-                pass 
-            plt .title ("MRR vs ART by Protocol")
-            scatter_path =figures_dir /"mrr_art_scatter.png"
-            plt .tight_layout ()
-            plt .savefig (str (scatter_path ))
-            plt .close ()
-        else :
-            scatter_path =figures_dir /"mrr_art_scatter_skipped.png"
+async def run_protocol_evaluations_and_plots(protocols: List[str] = None) -> Dict[str, Any]:
+    protocols = protocols or ['hub_and_spoke', 'broadcast', 'chain']
+    results_by_protocol = {}
+    art_records = []
+    scatter_records = []
+    cost_records = []
+
+    try:
+        sns.set_theme(style='whitegrid', palette='deep')
+    except Exception:
+        pass
+
+    for proto in protocols:
+        os.environ['MAMA_PROTOCOL'] = proto
+        eval_result = await run_full_evaluation()
+        results_by_protocol[proto] = eval_result
+        scenario_eval = eval_result.get('scenario_evaluation', {})
+        scenario_results = scenario_eval.get('scenario_results', {})
+        aggregate = scenario_eval.get('aggregate_metrics', {})
+        
+        avg_mrr = aggregate.get('average_mrr', 0.0)
+        avg_art = aggregate.get('average_response_time', 0.0)
+        
+        scatter_records.append({'protocol': proto, 'average_mrr': avg_mrr, 'average_art': avg_art})
+        
+        for name, sr in scenario_results.items():
+            metrics = sr.get('metrics', {})
+            art = metrics.get('response_time')
+            agent_perf = sr.get('agent_performance', {})
+            
+            if art is not None:
+                art_records.append({'protocol': proto, 'scenario': name, 'response_time': art})
+            
+            # Collect cost metrics
+            msg_count = agent_perf.get('message_count', 0)
+            token_cost = agent_perf.get('simulated_token_cost', 0)
+            cost_records.append({
+                'protocol': proto,
+                'scenario': name,
+                'message_count': msg_count,
+                'token_cost': token_cost
+            })
+
+    try:
+        import pandas as pd
+        df_art = pd.DataFrame(art_records)
+        df_scatter = pd.DataFrame(scatter_records)
+        df_cost = pd.DataFrame(cost_records)
+        
+        figures_dir = Path("figures").joinpath("extended")
+        figures_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. ART Boxplot
+        if not df_art.empty and 'protocol' in df_art.columns and 'response_time' in df_art.columns:
+            plt.figure(figsize=(8, 5))
+            sns.boxplot(data=df_art, x='protocol', y='response_time')
+            plt.ylabel("Response Time (s)")
+            plt.xlabel("Protocol")
+            try:
+                import numpy as np
+                mean_points = df_art.groupby('protocol')['response_time'].mean().reset_index()
+                sns.pointplot(data=mean_points, x='protocol', y='response_time', color='black', markers='D')
+            except Exception:
+                pass
+            plt.title("Protocol Latency Distribution (ART)")
+            art_path = figures_dir / "art_boxplot.png"
+            plt.tight_layout()
+            plt.savefig(str(art_path))
+            plt.close()
+        else:
+            art_path = figures_dir / "art_boxplot_skipped.png"
+
+        # 2. MRR vs ART Scatter
+        if not df_scatter.empty and {'average_art', 'average_mrr', 'protocol'}.issubset(set(df_scatter.columns)):
+            plt.figure(figsize=(8, 5))
+            sns.scatterplot(data=df_scatter, x='average_art', y='average_mrr', hue='protocol')
+            plt.xlabel("Average Response Time (s)")
+            plt.ylabel("Average MRR")
+            try:
+                sns.regplot(data=df_scatter, x='average_art', y='average_mrr', scatter=False, color='gray')
+                for _, row in df_scatter.iterrows():
+                    plt.text(row['average_art'], row['average_mrr'] + 0.002, row['protocol'], fontsize=9)
+            except Exception:
+                pass
+            plt.title("MRR vs ART by Protocol")
+            scatter_path = figures_dir / "mrr_art_scatter.png"
+            plt.tight_layout()
+            plt.savefig(str(scatter_path))
+            plt.close()
+        else:
+            scatter_path = figures_dir / "mrr_art_scatter_skipped.png"
+
+        # 3. Communication Overhead (Messages)
+        msg_path = figures_dir / "message_overhead.png"
+        if not df_cost.empty:
+            plt.figure(figsize=(8, 5))
+            sns.barplot(data=df_cost, x='protocol', y='message_count', errorbar='sd')
+            plt.ylabel("Message Count")
+            plt.title("Communication Overhead by Protocol")
+            plt.tight_layout()
+            plt.savefig(str(msg_path))
+            plt.close()
+
+        # 4. Token Cost
+        cost_path = figures_dir / "token_cost.png"
+        if not df_cost.empty:
+            plt.figure(figsize=(8, 5))
+            sns.barplot(data=df_cost, x='protocol', y='token_cost', errorbar='sd')
+            plt.ylabel("Simulated Token Cost")
+            plt.title("Computational Cost by Protocol")
+            plt.tight_layout()
+            plt.savefig(str(cost_path))
+            plt.close()
+
         return {
-        'status':'success',
-        'protocols':protocols ,
-        'results':results_by_protocol ,
-        'art_boxplot':str (art_path ),
-        'mrr_art_scatter':str (scatter_path )
+            'status': 'success',
+            'protocols': protocols,
+            'results': results_by_protocol,
+            'art_boxplot': str(art_path),
+            'mrr_art_scatter': str(scatter_path),
+            'message_plot': str(msg_path),
+            'cost_plot': str(cost_path)
         }
-    except Exception as e :
-        logger .error (f"Plot generation failed: {e }")
+    except Exception as e:
+        logger.error(f"Plot generation failed: {e}")
         return {
-        'status':'partial_success',
-        'protocols':protocols ,
-        'results':results_by_protocol ,
-        'error':str (e )
+            'status': 'partial_success',
+            'protocols': protocols,
+            'results': results_by_protocol,
+            'error': str(e)
         }
 
 async def _save_evaluation_results (results :Dict [str ,Any ]):
